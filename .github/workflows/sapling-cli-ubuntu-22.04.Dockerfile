@@ -67,3 +67,4 @@ RUN find $(yarn config get yarn-offline-mirror)
 # package cache into it.
 FROM base AS main
 COPY --from=populate-offline-cache /root/npm-packages-offline-cache /root/npm-packages-offline-cache
+
