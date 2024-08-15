@@ -1,0 +1,30 @@
+FROM sapling_ubuntu20.04:latest
+
+ARG GROUP_NAME=sapling
+ARG GROUP_ID=408
+ARG USER_NAME=sapling
+ARG USER_ID=650
+
+# https://serverfault.com/a/1016972 to ensure installing tzdata does not
+# result in a prompt that hangs forever.
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+# Create a new group and user with the specified IDs and names
+RUN if ! getent group $GROUP_NAME; then \
+    groupadd -g $GROUP_ID $GROUP_NAME; \
+    fi
+
+RUN if ! getent passwd $USER_NAME; then \
+    useradd -ms /bin/bash -g $GROUP_NAME -u $USER_ID $USER_NAME; \
+    fi
+
+RUN mkdir -p /home/$USER_NAME && cd /home/$USER_NAME && \
+    mkdir actions-runner && cd actions-runner && \
+    curl -o actions-runner-linux-arm64-2.319.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.319.0/actions-runner-linux-arm64-2.319.0.tar.gz && \
+    echo "524e75dc384ba8289fcea4914eb210f10c8c4e143213cef7d28f0c84dd2d017c  actions-runner-linux-arm64-2.319.0.tar.gz" | shasum -a 256 -c && \
+    tar xzf ./actions-runner-linux-arm64-2.319.0.tar.gz && \
+    chown -R $USER_NAME:$GROUP_NAME /home/$USER_NAME
+
+USER $USER_NAME
+CMD ["tail", "-f", "/dev/null"]
