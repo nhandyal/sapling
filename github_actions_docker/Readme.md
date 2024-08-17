@@ -1,12 +1,7 @@
-# Directions to build an ARM 64 deb distribution of sapling
-1. Execute `run.sh` -- this will build the required containers
-2. Start the container by running `docker run -it sapling_ga_ubuntu20.04:latest /bin/bash`
-3. Follow the directions under [configure](https://github.com/nhandyal/sapling/settings/actions/runners/new?arch=arm64&os=linux) to create a new arm64 runner:
-```
-cd '/home/sapling/actions-runner'
-./config.sh --url https://github.com/nhandyal/sapling --token <GA_TOKEN>
+# Directions to build an ARM 64 deb distribution of sapling on Ubuntu20.04
+1. Execute `run-ubuntu20.04.sh` -- this builds the required containers and launches the runner container
+2. Execute `./config.sh` -- Add the GA token from [here](https://github.com/nhandyal/sapling/settings/actions/runners/new?arch=arm64&os=linux)
+3. Execute `./run.sh`
 
-# after configuration
-./run.sh
-```
-4. 
+# Directions to build an ARM 64 deb distribution of sapling on Ubuntu22.04
+Same as above, but use the appropriate run script
