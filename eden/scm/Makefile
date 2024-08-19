@@ -128,6 +128,9 @@ build:
 deb:
 	./packaging/debian/build_deb.sh
 
+deb-arm:
+	./packaging/debian_arm/build_deb.sh
+
 rpm:
 	rpmbuild \
 		--define "sapling_root `pwd`" \

@@ -7,10 +7,17 @@ ARG GROUP_ID=408
 ARG USER_NAME=sapling
 ARG USER_ID=650
 
+# Set the environment variables for rustup and cargo paths
+ENV CARGO_HOME=/root/.cargo
+ENV PATH=$CARGO_HOME/bin:$PATH
+
 # https://serverfault.com/a/1016972 to ensure installing tzdata does not
 # result in a prompt that hangs forever.
 ARG DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
+
+RUN apt-get update -y && apt-get install -y \
+    sudo vim
 
 # Create a new group and user with the specified IDs and names
 RUN if ! getent group $GROUP_NAME; then \
@@ -36,8 +43,12 @@ RUN mv $CONFIG_SCRIPT_PATH /home/$USER_NAME/actions-runner/_config.sh && \
     echo 'read -p "Enter GH action runner token: " token' >> $CONFIG_SCRIPT_PATH && \
     echo './_config.sh --url https://github.com/nhandyal/sapling --token "$token" --unattended --labels self-hosted,ubuntu-20.04,arm64 --no-default-labels --replace'  >> $CONFIG_SCRIPT_PATH && \
     chmod +x $CONFIG_SCRIPT_PATH
-
-RUN chown -R $USER_NAME:$GROUP_NAME /home/$USER_NAME
+    
+# Configure the user
+RUN echo "$USER_NAME ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
+    echo 'export PATH=/root/.cargo/bin:$PATH' >> /home/$USER_NAME/.bashrc && \
+    chown -R $USER_NAME:$GROUP_NAME /root && \
+    chown -R $USER_NAME:$GROUP_NAME /home/$USER_NAME
 
 WORKDIR /home/$USER_NAME/actions-runner
 USER $USER_NAME
