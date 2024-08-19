@@ -56,6 +56,9 @@ cp --recursive install "$pkg_dir"
 mkdir "${pkg_dir}/install/debian"
 cp packaging/debian_arm/control "${pkg_dir}/install/debian/control"
 
+cat "${pkg_dir}/install/debian/control"
+exit 0
+
 # dpkg-shlibdeps requires the file `debian/control` to exist in the folder
 # in which it is run.
 pushd "$pkg_dir/install"
