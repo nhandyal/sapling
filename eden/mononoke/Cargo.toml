@@ -39,7 +39,7 @@ path = "cmds/streaming_clone_warmup/main.rs"
 [dependencies]
 anyhow = "1.0.75"
 ascii = "1.0"
-blobrepo = { version = "0.1.0", path = "blobrepo" }
+blobrepo_override = { version = "0.1.0", path = "blobrepo/override" }
 blobrepo_utils = { version = "0.1.0", path = "blobrepo_utils" }
 blobstore = { version = "0.1.0", path = "blobstore" }
 blobstore_factory = { version = "0.1.0", path = "blobstore/factory" }
@@ -60,10 +60,9 @@ commit_graph = { version = "0.1.0", path = "repo_attributes/commit_graph/commit_
 context = { version = "0.1.0", path = "server/context" }
 facet = { version = "0.1.0", git = "https://github.com/facebookexperimental/rust-shed.git", branch = "main" }
 failure_ext = { version = "0.1.0", git = "https://github.com/facebookexperimental/rust-shed.git", branch = "main" }
-fbinit = { version = "0.1.2", git = "https://github.com/facebookexperimental/rust-shed.git", branch = "main" }
+fbinit = { version = "0.2.0", git = "https://github.com/facebookexperimental/rust-shed.git", branch = "main" }
 futures = { version = "0.3.30", features = ["async-await", "compat"] }
 futures-util = "0.3.30"
-futures_old = { package = "futures", version = "0.1.31" }
 git2 = "0.14"
 lock_ext = { version = "0.1.0", git = "https://github.com/facebookexperimental/rust-shed.git", branch = "main" }
 mercurial_derivation = { version = "0.1.0", path = "derived_data/mercurial_derivation" }
@@ -116,7 +115,6 @@ members = [
   "blobimport",
   "blobimport_lib",
   "blobimport_lib/consts",
-  "blobrepo",
   "blobrepo/blobrepo_hg",
   "blobrepo/blobsync",
   "blobrepo/common",
@@ -368,7 +366,6 @@ members = [
   "microwave/if/mocks",
   "microwave/if/services",
   "mononoke_api",
-  "mononoke_api/types",
   "mononoke_api_hg",
   "mononoke_cas_sync_job",
   "mononoke_configs",

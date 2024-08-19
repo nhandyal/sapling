@@ -83,7 +83,7 @@ async fn land_stack(
     base_hgid: HgId,
     pushvars: HashMap<String, Bytes>,
 ) -> Result<LandStackData, Error> {
-    let repo = repo.repo();
+    let repo = repo.repo_ctx();
 
     let head = HgChangesetId::new(HgNodeHash::from(head_hgid));
     let head = repo
@@ -104,7 +104,7 @@ async fn land_stack(
     let force_local_pushrebase = justknobs::eval(
         "scm/mononoke:edenapi_force_local_pushrebase",
         None,
-        Some(repo.inner_repo().repo_identity().name()),
+        Some(repo.repo().repo_identity().name()),
     )
     .unwrap_or(false);
 

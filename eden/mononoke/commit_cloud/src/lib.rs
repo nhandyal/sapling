@@ -11,8 +11,10 @@ pub mod references;
 pub mod sql;
 use std::fmt::Display;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::bail;
+use anyhow::ensure;
 use bonsai_hg_mapping::BonsaiHgMapping;
 use changeset_info::ChangesetInfo;
 use commit_cloud_helpers::make_workspace_acl_name;
@@ -49,6 +51,8 @@ use crate::references::RawSmartlogData;
 use crate::sql::ops::Get;
 use crate::sql::ops::Insert;
 use crate::sql::ops::SqlCommitCloud;
+use crate::sql::ops::Update;
+use crate::sql::versions_ops::UpdateVersionArgs;
 
 #[facet]
 pub struct CommitCloud {
@@ -123,17 +127,16 @@ impl CommitCloud {
         prefix: &str,
         reponame: &str,
     ) -> anyhow::Result<Vec<WorkspaceData>> {
-        if reponame.is_empty() || prefix.is_empty() {
-            return Err(anyhow::anyhow!(
-                "'get workspaces' failed: empty reponame or prefix "
-            ));
-        }
+        ensure!(
+            !reponame.is_empty() && !prefix.is_empty(),
+            "'get workspaces' failed: empty reponame or prefix "
+        );
 
-        if prefix.len() < 3 {
-            return Err(anyhow::anyhow!(
-                "'get workspaces' failed: prefix must be at least 3 characters "
-            ));
-        }
+        ensure!(
+            prefix.len() >= 3,
+            "'get workspaces' failed: prefix must be at least 3 characters "
+        );
+
         let maybeworkspace =
             WorkspaceVersion::fetch_by_prefix(&self.storage, prefix, reponame).await?;
 
@@ -159,20 +162,21 @@ impl CommitCloud {
             latest_version = workspace_version.version;
             version_timestamp = workspace_version.timestamp.timestamp_nanos();
         }
-        if base_version > latest_version && latest_version == 0 {
-            return Err(anyhow::anyhow!(
-                "'get_references' failed: workspace {} has been removed or renamed",
-                cc_ctx.workspace.clone()
-            ));
-        }
 
-        if base_version > latest_version {
-            return Err(anyhow::anyhow!(
-                "'get_references' failed: base version {} is greater than latest version {}",
-                base_version,
-                latest_version
-            ));
-        }
+        ensure!(
+            base_version <= latest_version,
+            if latest_version == 0 {
+                format!(
+                    "'get_references' failed: workspace {} has been removed or renamed",
+                    cc_ctx.workspace.clone()
+                )
+            } else {
+                format!(
+                    "'get_references' failed: base version {} is greater than latest version {}",
+                    base_version, latest_version
+                )
+            }
+        );
 
         if base_version == latest_version {
             return Ok(ReferencesData {
@@ -276,6 +280,7 @@ impl CommitCloud {
 
         #[cfg(fbcode_build)]
         if !self.config.disable_interngraph_notification && !initiate_workspace {
+            let now = Instant::now();
             let notification =
                 NotificationData::from_update_references_params(params.clone(), new_version);
             let _ = publish_single_update(
@@ -285,6 +290,15 @@ impl CommitCloud {
                 self.ctx.fb,
             )
             .await?;
+            self.ctx.scuba().clone().log_with_msg(
+                "Sent interngraph notification",
+                format!(
+                    "For workspace {} in repo {} took {} ms",
+                    cc_ctx.workspace,
+                    cc_ctx.reponame,
+                    now.elapsed().as_millis()
+                ),
+            );
         }
         Ok(ReferencesData {
             version: new_version,
@@ -408,5 +422,39 @@ impl CommitCloud {
             remote_bookmarks: remote_bookmarks.to_owned(),
         };
         Ok(node)
+    }
+
+    pub async fn update_workspace_archive(
+        &self,
+        cc_ctx: &CommitCloudContext,
+        archived: bool,
+    ) -> anyhow::Result<String> {
+        // Check if workspace exists
+        let _ = self.get_workspace(cc_ctx).await?;
+
+        let txn = self
+            .storage
+            .connections
+            .write_connection
+            .start_transaction()
+            .await?;
+        let cri = self.ctx.client_request_info();
+        let (txn, affected_rows) = Update::<WorkspaceVersion>::update(
+            &self.storage,
+            txn,
+            cri,
+            cc_ctx.clone(),
+            UpdateVersionArgs::Archive(archived),
+        )
+        .await?;
+        txn.commit().await?;
+
+        ensure!(
+            affected_rows > 0,
+            "'update_workspace_archive' failed: failed on updating the workspace {} from DB",
+            cc_ctx.workspace.clone()
+        );
+
+        Ok(String::from("'update_workspace_archive' succeeded"))
     }
 }

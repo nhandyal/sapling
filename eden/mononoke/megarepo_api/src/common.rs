@@ -185,11 +185,9 @@ pub trait MegarepoOp {
                 .unwrap_or_else(|| "target config change".to_string()),
             Default::default(),
         );
-        state
-            .save_in_changeset(ctx, repo.blob_repo(), &mut bcs)
-            .await?;
+        state.save_in_changeset(ctx, repo.repo(), &mut bcs).await?;
         let merge = bcs.freeze()?;
-        save_changesets(ctx, repo.inner_repo(), vec![merge.clone()]).await?;
+        save_changesets(ctx, repo.repo(), vec![merge.clone()]).await?;
 
         // We don't want to have deletion commit on our mainline. So we'd like to create a new
         // merge commit whose parent is not a deletion commit. For that we take the manifest
@@ -204,7 +202,7 @@ pub trait MegarepoOp {
         let result = self
             .create_new_changeset_using_parents(
                 ctx,
-                repo.inner_repo(),
+                repo.repo(),
                 merge.get_changeset_id(),
                 new_parents,
                 message,
@@ -308,7 +306,7 @@ pub trait MegarepoOp {
         let old_target_with_removed_files = old_target_with_removed_files.freeze()?;
         save_changesets(
             ctx,
-            repo.blob_repo(),
+            repo.repo(),
             vec![old_target_with_removed_files.clone()],
         )
         .await?;
@@ -1095,11 +1093,10 @@ pub trait MegarepoOp {
         repo: &RepoContext,
         cs_id: ChangesetId,
     ) -> Result<CommitRemappingState, MegarepoError> {
-        let maybe_state =
-            CommitRemappingState::read_state_from_commit_opt(ctx, repo.blob_repo(), cs_id)
-                .await
-                .context("While reading remapping state file")
-                .map_err(MegarepoError::request)?;
+        let maybe_state = CommitRemappingState::read_state_from_commit_opt(ctx, repo.repo(), cs_id)
+            .await
+            .context("While reading remapping state file")
+            .map_err(MegarepoError::request)?;
 
         maybe_state.ok_or_else(|| {
             MegarepoError::request(anyhow!("no remapping state file exist for {}", cs_id))
@@ -1115,7 +1112,7 @@ pub async fn find_bookmark_and_value(
     let bookmark = BookmarkKey::new(bookmark_name).map_err(MegarepoError::request)?;
 
     let cs_id = repo
-        .blob_repo()
+        .repo()
         .bookmarks()
         .get(ctx.clone(), &bookmark)
         .map_err(MegarepoError::internal)

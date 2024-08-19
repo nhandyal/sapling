@@ -2833,12 +2833,6 @@ def debugrebuilddirstate(ui, repo, rev, **opts) -> None:
         dirstate.rebuild(ctx.node(), ctx.manifest(), changedfiles)
 
 
-@command("debugrebuildfncache", [], "")
-def debugrebuildfncache(ui, repo: Sized) -> None:
-    """rebuild the fncache file"""
-    repair.rebuildfncache(ui, repo)
-
-
 @command(
     "debugrename",
     [("r", "rev", "", _("revision to debug"), _("REV"))],
@@ -3981,7 +3975,6 @@ def debugcommitmessage(ui, repo, *args):
     ctx = context.workingcommitctx(repo, status, text, user, date, extra)
 
     editform = form or "commit.normal.normal"
-    extramsg = _("Leave message empty to abort commit.")
 
     forms = [e for e in editform.split(".") if e]
     forms.insert(0, "changeset")
@@ -3989,11 +3982,11 @@ def debugcommitmessage(ui, repo, *args):
         ref = ".".join(forms)
         tmpl = repo.ui.config("committemplate", ref)
         if tmpl:
-            committext = cmdutil.buildcommittemplate(repo, ctx, extramsg, ref)
+            committext = cmdutil.buildcommittemplate(repo, ctx, ref)
             break
         forms.pop()
     else:
-        committext = cmdutil.buildcommittext(repo, ctx, extramsg)
+        committext = cmdutil.buildcommittext(repo, ctx)
 
     ui.status(committext)
 

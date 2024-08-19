@@ -727,11 +727,7 @@ impl RepoContext {
     ) -> Result<Vec<(SortedVectorMap<String, Vec<u8>>, ChangesetContext)>, MononokeError> {
         self.start_write()?;
         self.authorization_context()
-            .require_repo_write(
-                self.ctx(),
-                self.inner_repo(),
-                RepoWriteOperation::CreateChangeset,
-            )
+            .require_repo_write(self.ctx(), self.repo(), RepoWriteOperation::CreateChangeset)
             .await?;
 
         let allowed_no_parents = self
@@ -929,9 +925,9 @@ impl RepoContext {
                 self.ctx(),
                 match &bubble {
                     Some(bubble) => {
-                        bubble.wrap_repo_blobstore(self.blob_repo().repo_blobstore().clone())
+                        bubble.wrap_repo_blobstore(self.repo().repo_blobstore().clone())
                     }
-                    None => self.blob_repo().repo_blobstore().clone(),
+                    None => self.repo().repo_blobstore().clone(),
                 },
                 stack_parent_ctxs,
                 path_changes_stack
@@ -950,8 +946,8 @@ impl RepoContext {
         // Resolve the changes so that they are ready to be converted into
         // bonsai changes. This also checks (1) for copy-from info.
         let blobstore = match &bubble {
-            Some(bubble) => bubble.wrap_repo_blobstore(self.blob_repo().repo_blobstore().clone()),
-            None => self.blob_repo().repo_blobstore().clone(),
+            Some(bubble) => bubble.wrap_repo_blobstore(self.repo().repo_blobstore().clone()),
+            None => self.repo().repo_blobstore().clone(),
         };
         borrowed!(blobstore);
         let resolve_file_changes_fut = async move {
@@ -966,7 +962,7 @@ impl RepoContext {
                                 change
                                     .resolve(
                                         self.ctx(),
-                                        *self.blob_repo().filestore_config(),
+                                        *self.repo().filestore_config(),
                                         blobstore.clone(),
                                         stack_changes,
                                         stack_parent_ctxs,
@@ -1046,14 +1042,10 @@ impl RepoContext {
         }
 
         if let Some(bubble) = &bubble {
-            self.save_changesets(
-                new_changesets,
-                &bubble.repo_view(self.inner_repo()),
-                Some(bubble),
-            )
-            .await?;
+            self.save_changesets(new_changesets, &bubble.repo_view(self.repo()), Some(bubble))
+                .await?;
         } else {
-            self.save_changesets(new_changesets, self.inner_repo(), None)
+            self.save_changesets(new_changesets, self.repo(), None)
                 .await?;
         }
 

@@ -31,6 +31,8 @@ use edenapi_types::BonsaiChangesetContent;
 use edenapi_types::BookmarkEntry;
 use edenapi_types::BookmarkRequest;
 use edenapi_types::CloneData;
+use edenapi_types::CloudShareWorkspaceRequest;
+use edenapi_types::CloudShareWorkspaceResponse;
 use edenapi_types::CloudWorkspaceRequest;
 use edenapi_types::CloudWorkspacesRequest;
 use edenapi_types::CommitGraphEntry;
@@ -86,6 +88,8 @@ use edenapi_types::ToWire;
 use edenapi_types::TreeAttributes;
 use edenapi_types::TreeEntry;
 use edenapi_types::TreeRequest;
+use edenapi_types::UpdateArchiveParams;
+use edenapi_types::UpdateArchiveResponse;
 use edenapi_types::UpdateReferencesParams;
 use edenapi_types::UploadBonsaiChangesetRequest;
 use edenapi_types::UploadHgChangeset;
@@ -140,8 +144,8 @@ const MAX_CONCURRENT_HASH_LOOKUPS_PER_REQUEST: usize = 1000;
 const MAX_CONCURRENT_BLAMES_PER_REQUEST: usize = 10;
 const MAX_ERROR_MSG_LEN: usize = 500;
 
-static REQUESTS_INFLIGHT: Counter = Counter::new("edenapi.req_inflight");
-static FILES_ATTRS_INFLIGHT: Counter = Counter::new("edenapi.files_attrs_inflight");
+static REQUESTS_INFLIGHT: Counter = Counter::new_counter("edenapi.req_inflight");
+static FILES_ATTRS_INFLIGHT: Counter = Counter::new_counter("edenapi.files_attrs_inflight");
 
 mod paths {
     pub const HEALTH_CHECK: &str = "health_check";
@@ -175,9 +179,11 @@ mod paths {
     pub const BLAME: &str = "blame";
     pub const CLOUD_WORKSPACE: &str = "cloud/workspace";
     pub const CLOUD_WORKSPACES: &str = "cloud/workspaces";
+    pub const CLOUD_UPDATE_ARCHIVE: &str = "cloud/update_archive";
     pub const CLOUD_UPDATE_REFERENCES: &str = "cloud/update_references";
     pub const CLOUD_REFERENCES: &str = "cloud/references";
     pub const CLOUD_SMARTLOG: &str = "cloud/smartlog";
+    pub const CLOUD_SHARE_WORKSPACE: &str = "cloud/share_workspace";
     pub const SUFFIXQUERY: &str = "suffix_query";
 }
 
@@ -1157,6 +1163,43 @@ impl Client {
 
         self.fetch_single::<SmartlogDataResponse>(request).await
     }
+
+    async fn cloud_share_workspace_attempt(
+        &self,
+        data: CloudShareWorkspaceRequest,
+    ) -> Result<CloudShareWorkspaceResponse, SaplingRemoteApiError> {
+        tracing::info!(
+            "Requesting share workspace '{}' in the repo '{}'",
+            data.workspace,
+            data.reponame
+        );
+        let url = self.build_url(paths::CLOUD_SHARE_WORKSPACE)?;
+        let request = self
+            .configure_request(self.inner.client.post(url))?
+            .cbor(&data.to_wire())
+            .map_err(SaplingRemoteApiError::RequestSerializationFailed)?;
+
+        self.fetch_single::<CloudShareWorkspaceResponse>(request)
+            .await
+    }
+
+    async fn cloud_update_archive_attempt(
+        &self,
+        data: UpdateArchiveParams,
+    ) -> Result<UpdateArchiveResponse, SaplingRemoteApiError> {
+        tracing::info!(
+            "Requesting cloud update archive for the workspace '{}' in the repo '{}' ",
+            data.workspace,
+            data.reponame
+        );
+        let url = self.build_url(paths::CLOUD_UPDATE_ARCHIVE)?;
+        let request = self
+            .configure_request(self.inner.client.post(url))?
+            .cbor(&data.to_wire())
+            .map_err(SaplingRemoteApiError::RequestSerializationFailed)?;
+
+        self.fetch_single::<UpdateArchiveResponse>(request).await
+    }
 }
 
 #[async_trait]
@@ -1812,6 +1855,22 @@ impl SaplingRemoteApi for Client {
         data: GetSmartlogParams,
     ) -> Result<SmartlogDataResponse, SaplingRemoteApiError> {
         self.with_retry(|this| this.cloud_smartlog_attempt(data.clone()).boxed())
+            .await
+    }
+
+    async fn cloud_share_workspace(
+        &self,
+        data: CloudShareWorkspaceRequest,
+    ) -> Result<CloudShareWorkspaceResponse, SaplingRemoteApiError> {
+        self.with_retry(|this| this.cloud_share_workspace_attempt(data.clone()).boxed())
+            .await
+    }
+
+    async fn cloud_update_archive(
+        &self,
+        data: UpdateArchiveParams,
+    ) -> Result<UpdateArchiveResponse, SaplingRemoteApiError> {
+        self.with_retry(|this| this.cloud_update_archive_attempt(data.clone()).boxed())
             .await
     }
 

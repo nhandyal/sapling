@@ -69,6 +69,21 @@ pub struct GitImportLfsInner {
     client: Client<HttpsConnector<HttpConnector>>,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum GitLfsFetchResult {
+    Fetched,
+    NotFound,
+}
+
+impl GitLfsFetchResult {
+    pub fn is_fetched(&self) -> bool {
+        *self == GitLfsFetchResult::Fetched
+    }
+
+    pub fn is_not_found(&self) -> bool {
+        *self == GitLfsFetchResult::NotFound
+    }
+}
 #[derive(Clone, Debug, Default)]
 pub struct GitImportLfs {
     inner: Option<Arc<GitImportLfsInner>>,
@@ -81,6 +96,7 @@ impl GitImportLfs {
     pub fn new(
         lfs_server: String,
         allow_not_found: bool,
+        max_attempts: u32,
         conn_limit: Option<usize>,
         tls_args: Option<TLSArgs>,
     ) -> Result<Self, Error> {
@@ -99,7 +115,7 @@ impl GitImportLfs {
         let inner = GitImportLfsInner {
             lfs_server,
             allow_not_found,
-            max_attempts: 30,
+            max_attempts,
             time_ms_between_attempts: 10000,
             conn_limit_sem: conn_limit.map(|x| Arc::new(Semaphore::new(x))),
             client,
@@ -128,6 +144,7 @@ impl GitImportLfs {
         (
             StoreRequest,
             impl Stream<Item = Result<Bytes, Error>> + Unpin,
+            GitLfsFetchResult,
         ),
         Error,
     > {
@@ -159,7 +176,7 @@ impl GitImportLfs {
         if resp.status().is_success() {
             let bytes = resp.into_body().map_err(Error::from);
             let sr = StoreRequest::with_sha256(metadata.size, metadata.sha256);
-            return Ok((sr, bytes.left_stream()));
+            return Ok((sr, bytes.left_stream(), GitLfsFetchResult::Fetched));
         }
         if resp.status() == StatusCode::NOT_FOUND && inner.allow_not_found {
             warn!(
@@ -174,7 +191,11 @@ impl GitImportLfs {
                 size,
             )?;
             let sr = StoreRequest::with_git_sha1(size, git_sha1);
-            return Ok((sr, stream::once(futures::future::ok(bytes)).right_stream()));
+            return Ok((
+                sr,
+                stream::once(futures::future::ok(bytes)).right_stream(),
+                GitLfsFetchResult::NotFound,
+            ));
         }
         Err(format_err!("{} response {:?}", uri, resp))
     }
@@ -183,7 +204,14 @@ impl GitImportLfs {
         &self,
         ctx: &CoreContext,
         metadata: &LfsPointerData,
-    ) -> Result<(StoreRequest, impl Stream<Item = Result<Bytes, Error>>), Error> {
+    ) -> Result<
+        (
+            StoreRequest,
+            impl Stream<Item = Result<Bytes, Error>>,
+            GitLfsFetchResult,
+        ),
+        Error,
+    > {
         let inner = self.inner.as_ref().ok_or_else(|| {
             format_err!("GitImportLfs::fetch_bytes called on disabled GitImportLfs")
         })?;
@@ -230,6 +258,7 @@ impl GitImportLfs {
                 LfsPointerData,
                 StoreRequest,
                 Box<dyn Stream<Item = Result<Bytes, Error>> + Send + Unpin>,
+                GitLfsFetchResult,
             ) -> Fut
             + Send
             + 'static,
@@ -248,8 +277,8 @@ impl GitImportLfs {
                 None
             };
 
-            let (req, bstream) = self.fetch_bytes(&ctx, &metadata).await?;
-            f(ctx, metadata, req, Box::new(bstream)).await
+            let (req, bstream, fetch_result) = self.fetch_bytes(&ctx, &metadata).await?;
+            f(ctx, metadata, req, Box::new(bstream), fetch_result).await
         })
         .await?
     }

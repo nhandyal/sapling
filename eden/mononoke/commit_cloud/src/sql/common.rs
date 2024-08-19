@@ -5,10 +5,6 @@
  * GNU General Public License version 2.
  */
 
-mod repo;
-
-pub use filestore::StoreRequest;
-
-pub use crate::repo::AsBlobRepo;
-pub use crate::repo::BlobRepo;
-pub use crate::repo::BlobRepoInner;
+pub struct UpdateWorkspaceNameArgs {
+    pub new_workspace: String,
+}

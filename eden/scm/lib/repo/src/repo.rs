@@ -42,6 +42,7 @@ use revisionstore::SaplingRemoteApiFileStore;
 use revisionstore::SaplingRemoteApiTreeStore;
 use revsets::errors::RevsetLookupError;
 use revsets::utils as revset_utils;
+use rewrite_macros::cached_field;
 use storemodel::FileStore;
 use storemodel::StoreInfo;
 use storemodel::StoreOutput;
@@ -81,6 +82,7 @@ pub struct Repo {
     eager_store: Option<EagerRepoStore>,
     locker: Arc<RepoLocker>,
     cas_client: OnceCell<Option<Arc<dyn CasClient>>>,
+    tree_resolver: OnceCell<Arc<dyn ReadTreeManifest + Send + Sync>>,
 }
 
 impl Repo {
@@ -189,6 +191,7 @@ impl Repo {
             #[cfg(feature = "wdir")]
             working_copy: Default::default(),
             eager_store: None,
+            tree_resolver: Default::default(),
             locker,
         })
     }
@@ -265,22 +268,11 @@ impl Repo {
         self.dot_hg_path.join(self.ident.config_repo_file())
     }
 
+    #[cached_field]
     pub fn metalog(&self) -> Result<Arc<RwLock<MetaLog>>> {
-        self.metalog
-            .get_or_try_init(|| Ok(Arc::new(RwLock::new(self.load_metalog()?))))
-            .cloned()
-    }
-
-    pub fn invalidate_metalog(&self) -> Result<()> {
-        if let Some(ml) = self.metalog.get() {
-            *ml.write() = self.load_metalog()?;
-        }
-        Ok(())
-    }
-
-    fn load_metalog(&self) -> Result<MetaLog> {
         let metalog_path = self.metalog_path();
-        Ok(MetaLog::open_from_env(metalog_path.as_path())?)
+        let metalog = MetaLog::open_from_env(metalog_path.as_path())?;
+        Ok(Arc::new(RwLock::new(metalog)))
     }
 
     pub fn metalog_path(&self) -> PathBuf {
@@ -382,30 +374,11 @@ impl Repo {
             .clone())
     }
 
+    #[cached_field]
     pub fn dag_commits(&self) -> Result<Arc<RwLock<Box<dyn DagCommits + Send + 'static>>>> {
-        Ok(self
-            .dag_commits
-            .get_or_try_init(
-                || -> Result<Arc<RwLock<Box<dyn DagCommits + Send + 'static>>>> {
-                    let info: &dyn StoreInfo = self;
-                    let commits: Box<dyn DagCommits + Send + 'static> =
-                        factory::call_constructor(info)?;
-                    let commits = Arc::new(RwLock::new(commits));
-                    Ok(commits)
-                },
-            )?
-            .clone())
-    }
-
-    pub fn invalidate_dag_commits(&self) -> Result<()> {
-        if let Some(dag_commits) = self.dag_commits.get() {
-            let mut dag_commits = dag_commits.write();
-            let info: &dyn StoreInfo = self;
-            let new_commits: Box<dyn DagCommits + Send + 'static> =
-                factory::call_constructor(info)?;
-            *dag_commits = new_commits;
-        }
-        Ok(())
+        let info: &dyn StoreInfo = self;
+        let commits: Box<dyn DagCommits + Send + 'static> = factory::call_constructor(info)?;
+        Ok(Arc::new(RwLock::new(commits)))
     }
 
     pub fn remote_bookmarks(&self) -> Result<BTreeMap<String, HgId>> {
@@ -564,17 +537,21 @@ impl Repo {
     }
 
     pub fn tree_resolver(&self) -> Result<Arc<dyn ReadTreeManifest + Send + Sync>> {
-        Ok(Arc::new(TreeManifestResolver::new(
-            self.dag_commits()?,
-            self.tree_store()?,
-        )))
+        let tr = self.tree_resolver.get_or_try_init(|| {
+            Ok::<_, anyhow::Error>(Arc::new(TreeManifestResolver::new(
+                self.dag_commits()?,
+                self.tree_store()?,
+                self.config
+                    // Trees are typically pretty small (and they are often kept in memory
+                    // anyway within a TreeManifest object), so let's pick a sizable
+                    // default. Set to 0 to disable caching.
+                    .get_or("experimental", "tree-resolver-cache-size", || 10_000)?,
+            )))
+        })?;
+        Ok(tr.clone())
     }
 
-    pub fn resolve_commit(
-        &mut self,
-        treestate: Option<&TreeState>,
-        change_id: &str,
-    ) -> Result<HgId> {
+    pub fn resolve_commit(&self, treestate: Option<&TreeState>, change_id: &str) -> Result<HgId> {
         let dag = self.dag_commits()?;
         let dag = dag.read();
         let metalog = self.metalog()?;
@@ -592,7 +569,7 @@ impl Repo {
     }
 
     pub fn resolve_commit_opt(
-        &mut self,
+        &self,
         treestate: Option<&TreeState>,
         change_id: &str,
     ) -> Result<Option<HgId>> {
@@ -645,7 +622,8 @@ impl Repo {
 
 #[cfg(feature = "wdir")]
 impl Repo {
-    fn load_working_copy(&self) -> Result<WorkingCopy, errors::InvalidWorkingCopy> {
+    #[cached_field]
+    pub fn working_copy(&self) -> Result<Arc<RwLock<WorkingCopy>>> {
         tracing::trace!(target: "repo::workingcopy", "creating file store");
         let file_store = self.file_store()?;
 
@@ -653,7 +631,7 @@ impl Repo {
         let tree_resolver = self.tree_resolver()?;
         let has_requirement = |s: &str| self.requirements.contains(s);
 
-        Ok(WorkingCopy::new(
+        let wc = WorkingCopy::new(
             &self.path,
             &self.config,
             self.storage_format(),
@@ -662,21 +640,10 @@ impl Repo {
             self.locker.clone(),
             &self.dot_hg_path,
             &has_requirement,
-        )?)
-    }
+        )
+        .map_err(errors::InvalidWorkingCopy::from)?;
 
-    pub fn working_copy(&self) -> Result<Arc<RwLock<WorkingCopy>>, errors::InvalidWorkingCopy> {
-        let wc = self.working_copy.get_or_try_init(|| {
-            Ok::<_, errors::InvalidWorkingCopy>(Arc::new(RwLock::new(self.load_working_copy()?)))
-        })?;
-        Ok(wc.clone())
-    }
-
-    pub fn invalidate_working_copy(&self) -> Result<()> {
-        if let Some(v) = self.working_copy.get() {
-            *v.write() = self.load_working_copy()?;
-        }
-        Ok(())
+        Ok(Arc::new(RwLock::new(wc)))
     }
 }
 

@@ -60,6 +60,11 @@ mononoke_queries! {
         "UPDATE versions SET archived={archived} WHERE reponame={reponame} AND workspace={workspace}"
     }
 
+    write UpdateWorkspaceName( reponame: String, workspace: String, new_workspace: String) {
+        none,
+        "UPDATE versions SET workspace = {new_workspace} WHERE workspace = {workspace} and reponame = {reponame}"
+    }
+
 }
 
 #[async_trait]
@@ -108,13 +113,14 @@ impl Insert<WorkspaceVersion> for SqlCommitCloud {
     }
 }
 
-pub struct ArchiveArgs {
-    pub archived: bool,
+pub enum UpdateVersionArgs {
+    Archive(bool),
+    WorkspaceName(String),
 }
 
 #[async_trait]
 impl Update<WorkspaceVersion> for SqlCommitCloud {
-    type UpdateArgs = ArchiveArgs;
+    type UpdateArgs = UpdateVersionArgs;
     async fn update(
         &self,
         txn: Transaction,
@@ -122,15 +128,30 @@ impl Update<WorkspaceVersion> for SqlCommitCloud {
         cc_ctx: CommitCloudContext,
         args: Self::UpdateArgs,
     ) -> anyhow::Result<(Transaction, u64)> {
-        let (txn, result) = UpdateArchive::maybe_traced_query_with_transaction(
-            txn,
-            cri,
-            &cc_ctx.reponame,
-            &cc_ctx.workspace,
-            &args.archived,
-        )
-        .await?;
-        Ok((txn, result.affected_rows()))
+        match args {
+            UpdateVersionArgs::Archive(archived) => {
+                let (txn, result) = UpdateArchive::maybe_traced_query_with_transaction(
+                    txn,
+                    cri,
+                    &cc_ctx.reponame,
+                    &cc_ctx.workspace,
+                    &archived,
+                )
+                .await?;
+                Ok((txn, result.affected_rows()))
+            }
+            UpdateVersionArgs::WorkspaceName(new_workspace) => {
+                let (txn, result) = UpdateWorkspaceName::maybe_traced_query_with_transaction(
+                    txn,
+                    cri,
+                    &cc_ctx.reponame,
+                    &cc_ctx.workspace,
+                    &new_workspace,
+                )
+                .await?;
+                return Ok((txn, result.affected_rows()));
+            }
+        }
     }
 }
 

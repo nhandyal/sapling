@@ -518,8 +518,16 @@ async fn try_sync_single_combined_entry<'a>(
     repo: &'a Repo,
     ctx: &'a CoreContext,
     combined_entry: &'a CombinedBookmarkUpdateLogEntry,
+    main_bookmark: &'a str,
 ) -> Result<RetryAttemptsCount, Error> {
-    re_cas_sync::try_sync_single_combined_entry(re_cas_client, repo, ctx, combined_entry).await
+    re_cas_sync::try_sync_single_combined_entry(
+        re_cas_client,
+        repo,
+        ctx,
+        combined_entry,
+        main_bookmark,
+    )
+    .await
 }
 
 /// Logs to Scuba information about a single sync event
@@ -698,6 +706,7 @@ async fn run<'a>(
             )
         })?;
     let main_bookmark_to_sync = sync_config.main_bookmark_to_sync.as_str();
+    let sync_all_bookmarks = sync_config.sync_all_bookmarks;
 
     // Before beginning any actual processing, check if cancellation has been requested.
     // If yes, then lets return early.
@@ -769,7 +778,9 @@ async fn run<'a>(
                     components: entries
                         .into_iter()
                         .filter_map(|entry| {
-                            if entry.bookmark_name.as_str() == main_bookmark_to_sync {
+                            if sync_all_bookmarks
+                                || entry.bookmark_name.as_str() == main_bookmark_to_sync
+                            {
                                 Some(entry)
                             } else {
                                 None
@@ -778,11 +789,16 @@ async fn run<'a>(
                         .collect::<Vec<_>>(),
                 };
                 if can_continue() && !combined_entry.components.is_empty() {
-                    let (stats, res) =
-                        try_sync_single_combined_entry(re_cas_client, repo, ctx, &combined_entry)
-                            .watched(ctx.logger())
-                            .timed()
-                            .await;
+                    let (stats, res) = try_sync_single_combined_entry(
+                        re_cas_client,
+                        repo,
+                        ctx,
+                        &combined_entry,
+                        main_bookmark_to_sync,
+                    )
+                    .watched(ctx.logger())
+                    .timed()
+                    .await;
 
                     let res = bind_sync_result(&combined_entry.components, res);
                     let res = match res {

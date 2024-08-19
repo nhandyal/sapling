@@ -46,7 +46,7 @@ impl RepoContext {
         let old_target = match old_target {
             Some(old_target) => old_target,
             None => self
-                .blob_repo()
+                .repo()
                 .bookmarks()
                 .get(self.ctx().clone(), bookmark)
                 .await
@@ -156,7 +156,7 @@ impl RepoContext {
                 .run(
                     self.ctx(),
                     self.authorization_context(),
-                    redirector.repo.inner_repo(),
+                    &redirector.repo,
                     redirector.repo.hook_manager(),
                 )
                 .await?;
@@ -167,7 +167,7 @@ impl RepoContext {
                 .run(
                     self.ctx(),
                     self.authorization_context(),
-                    self.inner_repo(),
+                    self.repo(),
                     self.hook_manager().as_ref(),
                 )
                 .await?;
@@ -206,7 +206,7 @@ impl RepoContext {
             .run_with_transaction(
                 self.ctx(),
                 self.authorization_context(),
-                self.inner_repo(),
+                self.repo(),
                 self.hook_manager().as_ref(),
                 txn,
                 txn_hooks,

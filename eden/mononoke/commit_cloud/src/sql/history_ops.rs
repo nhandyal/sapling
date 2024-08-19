@@ -16,6 +16,7 @@ use crate::references::heads::WorkspaceHead;
 use crate::references::history::WorkspaceHistory;
 use crate::references::local_bookmarks::WorkspaceLocalBookmark;
 use crate::references::remote_bookmarks::WorkspaceRemoteBookmark;
+use crate::sql::common::UpdateWorkspaceNameArgs;
 use crate::sql::ops::Delete;
 use crate::sql::ops::GenericGet;
 use crate::sql::ops::Insert;
@@ -84,6 +85,11 @@ mononoke_queries! {
             VALUES ({reponame},{workspace},{version},{heads},{bookmarks},{remote_bookmarks}, FROM_UNIXTIME({timestamp}))")
         sqlite("INSERT INTO history (reponame, workspace, version, heads, bookmarks, remotebookmarks, timestamp)
         VALUES ({reponame},{workspace},{version},{heads},{bookmarks},{remote_bookmarks}, {timestamp}) ")
+    }
+
+    write UpdateWorkspaceName( reponame: String, workspace: String, new_workspace: String) {
+        none,
+        "UPDATE history SET workspace = {new_workspace} WHERE workspace = {workspace} and reponame = {reponame}"
     }
 
 
@@ -247,16 +253,22 @@ impl Insert<WorkspaceHistory> for SqlCommitCloud {
 
 #[async_trait]
 impl Update<WorkspaceHistory> for SqlCommitCloud {
-    type UpdateArgs = ();
-
+    type UpdateArgs = UpdateWorkspaceNameArgs;
     async fn update(
         &self,
-        _txn: Transaction,
-        _cri: Option<&ClientRequestInfo>,
-        _cc_ctx: CommitCloudContext,
-        _args: Self::UpdateArgs,
+        txn: Transaction,
+        cri: Option<&ClientRequestInfo>,
+        cc_ctx: CommitCloudContext,
+        args: Self::UpdateArgs,
     ) -> anyhow::Result<(Transaction, u64)> {
-        //To be implemented among other Update queries
-        return Err(anyhow::anyhow!("Not implemented yet"));
+        let (txn, result) = UpdateWorkspaceName::maybe_traced_query_with_transaction(
+            txn,
+            cri,
+            &cc_ctx.reponame,
+            &cc_ctx.workspace,
+            &args.new_workspace,
+        )
+        .await?;
+        Ok((txn, result.affected_rows()))
     }
 }

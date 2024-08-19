@@ -19,14 +19,12 @@ use bookmarks::BookmarkKey;
 use bookmarks::BookmarksRef;
 use context::CoreContext;
 use fbinit::FacebookInit;
-use git_types::MappedGitCommitId;
 use maplit::btreemap;
 use mononoke_types::hash::GitSha1;
 use mononoke_types::ChangesetId;
 use mononoke_types::FileType;
 use mononoke_types::NonRootMPath;
 use repo_blobstore::RepoBlobstoreRef;
-use repo_derived_data::RepoDerivedDataRef;
 use repo_identity::RepoIdentityRef;
 use tests_utils::CreateCommitContext;
 
@@ -102,11 +100,7 @@ async fn test_submodule_expansion_basic(fb: FacebookInit) -> Result<()> {
             .commit()
             .await?;
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_b_cs_id)
-        .await?;
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash = git_sha1_from_changeset(&ctx, &repo_b, repo_b_cs_id).await?;
 
     const MESSAGE: &str = "Update submodule after adding and deleting a file";
 
@@ -124,13 +118,13 @@ async fn test_submodule_expansion_basic(fb: FacebookInit) -> Result<()> {
     .commit()
     .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, small_repo_cs_id)
-        .await?
-        .ok_or(anyhow!("Failed to sync commit"))?;
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, &large_repo_changesets).await?;
+    let (large_repo_cs_id, large_repo_changesets) = sync_changeset_and_derive_all_types(
+        ctx.clone(),
+        small_repo_cs_id,
+        &large_repo,
+        &commit_syncer,
+    )
+    .await?;
 
     check_mapping(
         ctx.clone(),
@@ -175,11 +169,7 @@ async fn test_submodule_expansion_basic(fb: FacebookInit) -> Result<()> {
 async fn test_recursive_submodule_expansion_basic(fb: FacebookInit) -> Result<()> {
     let ctx = CoreContext::test_mock(fb.clone());
     let (repo_c, repo_c_cs_map) = build_repo_c(fb).await?;
-    let c_master_mapped_git_commit = repo_c
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_c_cs_map["C_B"])
-        .await?;
-    let c_master_git_sha1 = *c_master_mapped_git_commit.oid();
+    let c_master_git_sha1 = git_sha1_from_changeset(&ctx, &repo_c, repo_c_cs_map["C_B"]).await?;
 
     let repo_c_submodule_path_in_repo_b = NonRootMPath::new("submodules/repo_c")?;
     let (repo_b, repo_b_cs_map) =
@@ -241,11 +231,7 @@ async fn test_recursive_submodule_expansion_basic(fb: FacebookInit) -> Result<()
             .commit()
             .await?;
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_b_cs_id)
-        .await?;
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash = git_sha1_from_changeset(&ctx, &repo_b, repo_b_cs_id).await?;
 
     const MESSAGE: &str = "Update submodule after adding and deleting a file";
 
@@ -260,14 +246,13 @@ async fn test_recursive_submodule_expansion_basic(fb: FacebookInit) -> Result<()
             .commit()
             .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, small_repo_cs_id)
-        .await?
-        .ok_or(anyhow!("Failed to sync commit"))?;
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-    println!("large_repo_changesets: {:#?}\n\n", &large_repo_changesets);
-
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, &large_repo_changesets).await?;
+    let (large_repo_cs_id, _large_repo_changesets) = sync_changeset_and_derive_all_types(
+        ctx.clone(),
+        small_repo_cs_id,
+        &large_repo,
+        &commit_syncer,
+    )
+    .await?;
 
     check_submodule_metadata_file_in_large_repo(
         &ctx,
@@ -349,15 +334,9 @@ async fn test_submodule_deletion(fb: FacebookInit) -> Result<()> {
     .commit()
     .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, cs_id)
-        .await?
-        .ok_or(anyhow!("Failed to sync commit deleting submodule B"))?;
-
-    println!("large_repo_cs_id: {}", large_repo_cs_id);
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, &large_repo_changesets).await?;
+    let (large_repo_cs_id, large_repo_changesets) =
+        sync_changeset_and_derive_all_types(ctx.clone(), cs_id, &large_repo, &commit_syncer)
+            .await?;
 
     check_mapping(ctx.clone(), &commit_syncer, cs_id, Some(large_repo_cs_id)).await;
 
@@ -380,11 +359,8 @@ async fn test_submodule_deletion(fb: FacebookInit) -> Result<()> {
 async fn test_recursive_submodule_deletion(fb: FacebookInit) -> Result<()> {
     let ctx = CoreContext::test_mock(fb.clone());
     let (repo_c, repo_c_cs_map) = build_repo_c(fb).await?;
-    let c_master_mapped_git_commit = repo_c
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_c_cs_map["C_B"])
-        .await?;
-    let c_master_git_sha1 = *c_master_mapped_git_commit.oid();
+
+    let c_master_git_sha1 = git_sha1_from_changeset(&ctx, &repo_c, repo_c_cs_map["C_B"]).await?;
 
     let repo_c_submodule_path_in_repo_b = NonRootMPath::new("submodules/repo_c")?;
     let (repo_b, repo_b_cs_map) =
@@ -416,11 +392,7 @@ async fn test_recursive_submodule_deletion(fb: FacebookInit) -> Result<()> {
             .commit()
             .await?;
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_b_cs_id)
-        .await?;
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash = git_sha1_from_changeset(&ctx, &repo_b, repo_b_cs_id).await?;
 
     const MESSAGE: &str = "Update submodule after deleting repo_c submodule in repo_b";
 
@@ -435,15 +407,13 @@ async fn test_recursive_submodule_deletion(fb: FacebookInit) -> Result<()> {
             .commit()
             .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, small_repo_cs_id)
-        .await
-        .context("sync_to_master failed")
-        .and_then(|res| res.ok_or(anyhow!("No commit was synced")))?;
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-    println!("large_repo_changesets: {:#?}\n\n", &large_repo_changesets);
-
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, &large_repo_changesets).await?;
+    let (large_repo_cs_id, large_repo_changesets) = sync_changeset_and_derive_all_types(
+        ctx.clone(),
+        small_repo_cs_id,
+        &large_repo,
+        &commit_syncer,
+    )
+    .await?;
 
     compare_expected_changesets(
         large_repo_changesets.last_chunk::<1>().unwrap(),
@@ -496,11 +466,7 @@ async fn test_recursive_submodule_deletion(fb: FacebookInit) -> Result<()> {
 async fn test_submodule_with_recursive_submodule_deletion(fb: FacebookInit) -> Result<()> {
     let ctx = CoreContext::test_mock(fb.clone());
     let (repo_c, repo_c_cs_map) = build_repo_c(fb).await?;
-    let c_master_mapped_git_commit = repo_c
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_c_cs_map["C_B"])
-        .await?;
-    let c_master_git_sha1 = *c_master_mapped_git_commit.oid();
+    let c_master_git_sha1 = git_sha1_from_changeset(&ctx, &repo_c, repo_c_cs_map["C_B"]).await?;
 
     let repo_c_submodule_path_in_repo_b = NonRootMPath::new("submodules/repo_c")?;
     let (repo_b, _repo_b_cs_map) =
@@ -533,15 +499,13 @@ async fn test_submodule_with_recursive_submodule_deletion(fb: FacebookInit) -> R
             .commit()
             .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, small_repo_cs_id)
-        .await
-        .context("sync_to_master failed")
-        .and_then(|res| res.ok_or(anyhow!("No commit was synced")))?;
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-    println!("large_repo_changesets: {:#?}\n\n", &large_repo_changesets);
-
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, &large_repo_changesets).await?;
+    let (large_repo_cs_id, large_repo_changesets) = sync_changeset_and_derive_all_types(
+        ctx.clone(),
+        small_repo_cs_id,
+        &large_repo,
+        &commit_syncer,
+    )
+    .await?;
 
     compare_expected_changesets(
         large_repo_changesets.last_chunk::<1>().unwrap(),
@@ -670,15 +634,14 @@ async fn test_deleting_submodule_but_keeping_directory(fb: FacebookInit) -> Resu
         .commit()
         .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, chg_sm_path_cs_id)
-        .await
-        .context("sync_to_master failed")
-        .and_then(|res| res.ok_or(anyhow!("No commit was synced")))?;
+    let (large_repo_cs_id, large_repo_changesets) = sync_changeset_and_derive_all_types(
+        ctx.clone(),
+        chg_sm_path_cs_id,
+        &large_repo,
+        &commit_syncer,
+    )
+    .await?;
 
-    println!("large_repo_cs_id: {0:#?}", large_repo_cs_id);
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, &large_repo_changesets).await?;
     compare_expected_changesets_from_basic_setup(
         &large_repo_changesets,
         &[
@@ -754,11 +717,7 @@ async fn test_deleting_recursive_submodule_but_keeping_directory(fb: FacebookIni
     let ctx = CoreContext::test_mock(fb.clone());
 
     let (repo_c, repo_c_cs_map) = build_repo_c(fb).await?;
-    let c_master_mapped_git_commit = repo_c
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_c_cs_map["C_B"])
-        .await?;
-    let c_master_git_sha1 = *c_master_mapped_git_commit.oid();
+    let c_master_git_sha1 = git_sha1_from_changeset(&ctx, &repo_c, repo_c_cs_map["C_B"]).await?;
 
     let repo_c_submodule_path_in_repo_b = NonRootMPath::new("submodules/repo_c")?;
     let (repo_b, repo_b_cs_map) =
@@ -805,11 +764,8 @@ async fn test_deleting_recursive_submodule_but_keeping_directory(fb: FacebookIni
             .commit()
             .await?;
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, del_repo_c_md_file_cs_id)
-        .await?;
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash =
+        git_sha1_from_changeset(&ctx, &repo_b, del_repo_c_md_file_cs_id).await?;
 
     let del_md_file_cs_id =
         CreateCommitContext::new(&ctx, &small_repo, vec![small_repo_cs_map["A_C"]])
@@ -828,8 +784,6 @@ async fn test_deleting_recursive_submodule_but_keeping_directory(fb: FacebookIni
         .and_then(|res| res.ok_or(anyhow!("No commit was synced")))?;
 
     let first_expected_cs_id = large_repo_cs_id;
-
-    println!("large_repo_cs_id: {0:#?}", large_repo_cs_id);
 
     assert_working_copy_matches_expected(
         &ctx,
@@ -875,11 +829,8 @@ async fn test_deleting_recursive_submodule_but_keeping_directory(fb: FacebookIni
             .commit()
             .await?;
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, chg_repo_c_copy_cs_id)
-        .await?;
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash =
+        git_sha1_from_changeset(&ctx, &repo_b, chg_repo_c_copy_cs_id).await?;
 
     let chg_sm_path_cs_id = CreateCommitContext::new(&ctx, &small_repo, vec![del_md_file_cs_id])
         .set_message(CHANGE_SUBMODULE_PATH_MSG)
@@ -891,15 +842,13 @@ async fn test_deleting_recursive_submodule_but_keeping_directory(fb: FacebookIni
         .commit()
         .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, chg_sm_path_cs_id)
-        .await
-        .context("Failed to sync chg_sm_path_cs_id")
-        .and_then(|res| res.ok_or(anyhow!("No commit was synced")))?;
-
-    println!("large_repo_cs_id: {0:#?}", large_repo_cs_id);
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, &large_repo_changesets).await?;
+    let (large_repo_cs_id, large_repo_changesets) = sync_changeset_and_derive_all_types(
+        ctx.clone(),
+        chg_sm_path_cs_id,
+        &large_repo,
+        &commit_syncer,
+    )
+    .await?;
 
     compare_expected_changesets(
         large_repo_changesets.last_chunk::<2>().unwrap(),
@@ -1020,14 +969,9 @@ async fn test_implicitly_deleting_submodule(fb: FacebookInit) -> Result<()> {
     .commit()
     .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, cs_id)
-        .await?
-        .ok_or(anyhow!("Commit wasn't synced"))?;
-
-    println!("large_repo_cs_id: {}", large_repo_cs_id);
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, &large_repo_changesets).await?;
+    let (large_repo_cs_id, large_repo_changesets) =
+        sync_changeset_and_derive_all_types(ctx.clone(), cs_id, &large_repo, &commit_syncer)
+            .await?;
 
     compare_expected_changesets_from_basic_setup(
         &large_repo_changesets,
@@ -1102,12 +1046,7 @@ async fn test_implicit_deletions_inside_submodule_repo(fb: FacebookInit) -> Resu
         .commit()
         .await?;
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_b_cs_id)
-        .await?;
-
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash = git_sha1_from_changeset(&ctx, &repo_b, repo_b_cs_id).await?;
 
     // Update repo B submodule pointer in repo A to point to the last commit
     // with the implicit deletions.
@@ -1126,12 +1065,9 @@ async fn test_implicit_deletions_inside_submodule_repo(fb: FacebookInit) -> Resu
     .commit()
     .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, cs_id)
-        .await?
-        .ok_or(anyhow!("Failed to sync commit"))?;
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, &large_repo_changesets).await?;
+    let (large_repo_cs_id, large_repo_changesets) =
+        sync_changeset_and_derive_all_types(ctx.clone(), cs_id, &large_repo, &commit_syncer)
+            .await?;
 
     check_mapping(ctx.clone(), &commit_syncer, cs_id, Some(large_repo_cs_id)).await;
 
@@ -1229,12 +1165,8 @@ async fn test_implicitly_deleting_file_with_submodule(fb: FacebookInit) -> Resul
         test_sync_config_source,
     )?;
 
-    let repo_c_mapped_git_commit = repo_c
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_c_cs_map["C_B"])
-        .await?;
-
-    let repo_c_git_commit_hash = *repo_c_mapped_git_commit.oid();
+    let repo_c_git_commit_hash =
+        git_sha1_from_changeset(&ctx, &repo_c, repo_c_cs_map["C_B"]).await?;
 
     const MESSAGE: &str = "Add submodule on path of existing file";
     let cs_id = CreateCommitContext::new(&ctx, &small_repo, vec![small_repo_cs_map["A_C"]])
@@ -1247,13 +1179,9 @@ async fn test_implicitly_deleting_file_with_submodule(fb: FacebookInit) -> Resul
         .commit()
         .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, cs_id)
-        .await?
-        .ok_or(anyhow!("No commit synced"))?;
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, large_repo_changesets.as_slice()).await?;
+    let (large_repo_cs_id, large_repo_changesets) =
+        sync_changeset_and_derive_all_types(ctx.clone(), cs_id, &large_repo, &commit_syncer)
+            .await?;
 
     check_mapping(ctx.clone(), &commit_syncer, cs_id, Some(large_repo_cs_id)).await;
 
@@ -1349,12 +1277,8 @@ async fn test_adding_submodule_on_existing_directory(fb: FacebookInit) -> Result
         test_sync_config_source,
     )?;
 
-    let repo_c_mapped_git_commit = repo_c
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_c_cs_map["C_B"])
-        .await?;
-
-    let repo_c_git_commit_hash = *repo_c_mapped_git_commit.oid();
+    let repo_c_git_commit_hash =
+        git_sha1_from_changeset(&ctx, &repo_c, repo_c_cs_map["C_B"]).await?;
 
     const MESSAGE: &str = "Add submodule on path of existing directory";
     let cs_id = CreateCommitContext::new(&ctx, &small_repo, vec![add_dir_cs_id])
@@ -1367,14 +1291,9 @@ async fn test_adding_submodule_on_existing_directory(fb: FacebookInit) -> Result
         .commit()
         .await?;
 
-    let large_repo_cs_id = sync_to_master(ctx.clone(), &commit_syncer, cs_id)
-        .await
-        .context("Failed to sync commit replacing existing directory with submodule expansion")?
-        .ok_or(anyhow!("No commit synced"))?;
-
-    let large_repo_changesets = get_all_changeset_data_from_repo(&ctx, &large_repo).await?;
-
-    derive_all_enabled_types_for_repo(&ctx, &large_repo, large_repo_changesets.as_slice()).await?;
+    let (large_repo_cs_id, large_repo_changesets) =
+        sync_changeset_and_derive_all_types(ctx.clone(), cs_id, &large_repo, &commit_syncer)
+            .await?;
 
     compare_expected_changesets_from_basic_setup(
         &large_repo_changesets,
@@ -1444,12 +1363,8 @@ async fn test_submodule_expansion_crashes_when_dep_not_available(fb: FacebookIni
     .await?;
 
     // Get a git commit from repo C
-    let repo_c_mapped_git_commit = repo_c
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_c_cs_map["C_B"])
-        .await?;
-
-    let repo_c_git_commit_hash = *repo_c_mapped_git_commit.oid();
+    let repo_c_git_commit_hash =
+        git_sha1_from_changeset(&ctx, &repo_c, repo_c_cs_map["C_B"]).await?;
 
     // Create a commit in repo A that adds repo C as a submodule.
     const MESSAGE: &str = "Add submodule on path of existing file";
@@ -1556,12 +1471,8 @@ async fn test_submodule_validation_fails_with_file_on_metadata_file_path_in_smal
     const MESSAGE_CS_2: &str =
         "Add file with same path as a submodule metadata file with valid git commit hash";
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_b_cs_map["B_A"])
-        .await?;
-
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash =
+        git_sha1_from_changeset(&ctx, &repo_b, repo_b_cs_map["B_A"]).await?;
 
     let small_repo_cs_id =
         CreateCommitContext::new(&ctx, &small_repo, vec![small_repo_cs_map["A_C"]])
@@ -1604,11 +1515,8 @@ async fn test_submodule_validation_fails_with_file_on_metadata_file_path_in_recu
 ) -> Result<()> {
     let ctx = CoreContext::test_mock(fb.clone());
     let (repo_c, repo_c_cs_map) = build_repo_c(fb).await?;
-    let c_master_mapped_git_commit = repo_c
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_c_cs_map["C_B"])
-        .await?;
-    let c_master_git_sha1 = *c_master_mapped_git_commit.oid();
+
+    let c_master_git_sha1 = git_sha1_from_changeset(&ctx, &repo_c, repo_c_cs_map["C_B"]).await?;
 
     let repo_c_submodule_path_in_repo_b = NonRootMPath::new("submodules/repo_c")?;
     let (repo_b, repo_b_cs_map) =
@@ -1643,11 +1551,7 @@ async fn test_submodule_validation_fails_with_file_on_metadata_file_path_in_recu
         .commit()
         .await?;
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_b_cs_id)
-        .await?;
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash = git_sha1_from_changeset(&ctx, &repo_b, repo_b_cs_id).await?;
 
     const MESSAGE: &str =
         "Update repo_b submodule after adding a file in the same place as a metadata file";
@@ -1696,11 +1600,7 @@ async fn test_expanding_known_dangling_submodule_pointers(fb: FacebookInit) -> R
     let ctx = CoreContext::test_mock(fb.clone());
 
     let (repo_c, repo_c_cs_map) = build_repo_c(fb).await?;
-    let c_master_mapped_git_commit = repo_c
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_c_cs_map["C_B"])
-        .await?;
-    let c_master_git_sha1 = *c_master_mapped_git_commit.oid();
+    let c_master_git_sha1 = git_sha1_from_changeset(&ctx, &repo_c, repo_c_cs_map["C_B"]).await?;
 
     let repo_c_submodule_path_in_repo_b = NonRootMPath::new("submodules/repo_c")?;
     let (repo_b, repo_b_cs_map) =
@@ -1803,11 +1703,7 @@ async fn test_expanding_known_dangling_submodule_pointers(fb: FacebookInit) -> R
             .commit()
             .await?;
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_b_cs_id)
-        .await?;
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash = git_sha1_from_changeset(&ctx, &repo_b, repo_b_cs_id).await?;
 
     let small_repo_cs_id = CreateCommitContext::new(&ctx, &small_repo, vec![small_repo_cs_id])
         .set_message(COMMIT_MSG_2)
@@ -1857,11 +1753,7 @@ async fn test_expanding_known_dangling_submodule_pointers(fb: FacebookInit) -> R
         .commit()
         .await?;
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_b_cs_id)
-        .await?;
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash = git_sha1_from_changeset(&ctx, &repo_b, repo_b_cs_id).await?;
 
     let small_repo_cs_id = CreateCommitContext::new(&ctx, &small_repo, vec![small_repo_cs_id])
         .set_message(COMMIT_MSG_3)
@@ -1907,11 +1799,7 @@ async fn test_expanding_known_dangling_submodule_pointers(fb: FacebookInit) -> R
         .commit()
         .await?;
 
-    let repo_b_mapped_git_commit = repo_b
-        .repo_derived_data()
-        .derive::<MappedGitCommitId>(&ctx, repo_b_cs_id)
-        .await?;
-    let repo_b_git_commit_hash = *repo_b_mapped_git_commit.oid();
+    let repo_b_git_commit_hash = git_sha1_from_changeset(&ctx, &repo_b, repo_b_cs_id).await?;
 
     let small_repo_cs_id = CreateCommitContext::new(&ctx, &small_repo, vec![small_repo_cs_id])
         .set_message(COMMIT_MSG_4)

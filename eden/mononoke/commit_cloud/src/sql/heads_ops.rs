@@ -13,6 +13,7 @@ use sql::Transaction;
 
 use crate::ctx::CommitCloudContext;
 use crate::references::heads::WorkspaceHead;
+use crate::sql::common::UpdateWorkspaceNameArgs;
 use crate::sql::ops::Delete;
 use crate::sql::ops::Get;
 use crate::sql::ops::Insert;
@@ -42,6 +43,11 @@ mononoke_queries! {
         none,
         mysql("INSERT INTO `heads` (`reponame`, `workspace`, `node`) VALUES ({reponame}, {workspace}, {commit})")
         sqlite("INSERT INTO `heads` (`reponame`, `workspace`, `commit`) VALUES ({reponame}, {workspace}, {commit})")
+    }
+
+    write UpdateWorkspaceName( reponame: String, workspace: String, new_workspace: String) {
+        none,
+        "UPDATE heads SET workspace = {new_workspace} WHERE workspace = {workspace} and reponame = {reponame}"
     }
 }
 
@@ -84,17 +90,23 @@ impl Insert<WorkspaceHead> for SqlCommitCloud {
 
 #[async_trait]
 impl Update<WorkspaceHead> for SqlCommitCloud {
-    type UpdateArgs = ();
-
+    type UpdateArgs = UpdateWorkspaceNameArgs;
     async fn update(
         &self,
-        _txn: Transaction,
-        _cri: Option<&ClientRequestInfo>,
-        _cc_ctx: CommitCloudContext,
-        _args: Self::UpdateArgs,
+        txn: Transaction,
+        cri: Option<&ClientRequestInfo>,
+        cc_ctx: CommitCloudContext,
+        args: Self::UpdateArgs,
     ) -> anyhow::Result<(Transaction, u64)> {
-        //To be implemented among other Update queries
-        return Err(anyhow::anyhow!("Not implemented yet"));
+        let (txn, result) = UpdateWorkspaceName::maybe_traced_query_with_transaction(
+            txn,
+            cri,
+            &cc_ctx.reponame,
+            &cc_ctx.workspace,
+            &args.new_workspace,
+        )
+        .await?;
+        Ok((txn, result.affected_rows()))
     }
 }
 

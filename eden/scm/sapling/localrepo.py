@@ -591,10 +591,7 @@ class localrepository:
         if self.ui.configbool("devel", "all-warnings") or self.ui.configbool(
             "devel", "check-locks"
         ):
-            if hasattr(self.svfs, "vfs"):  # this is filtervfs
-                self.svfs.vfs.audit = self._getsvfsward(self.svfs.vfs.audit)
-            else:  # standard vfs
-                self.svfs.audit = self._getsvfsward(self.svfs.audit)
+            self.svfs.audit = self._getsvfsward(self.svfs.audit)
         if "store" in self.requirements:
             try:
                 self.storerequirements = scmutil.readrequires(
@@ -2020,11 +2017,6 @@ class localrepository:
         # them before opening the new transaction.
         commitnotransaction(None)
 
-        # note: writing the fncache only during finalize mean that the file is
-        # outdated when running hooks. As fncache is used for streaming clone,
-        # this is not expected to break anything that happen during the hooks.
-        tr.addfinalize("flush-fncache", self.store.write)
-
         def txnclosehook(tr2):
             """To be run if transaction is successful, will schedule a hook run"""
             # Don't reference tr2 in hook() so we don't hold a reference.
@@ -3290,8 +3282,6 @@ def newreporequirements(repo) -> Set[str]:
     ui = repo.ui
     requirements = {"revlogv1"}
     requirements.add("store")
-    requirements.add("fncache")
-    requirements.add("dotencode")
 
     compengine = ui.config("experimental", "format.compression")
     if compengine not in util.compengines:

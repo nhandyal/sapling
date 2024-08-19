@@ -92,7 +92,7 @@ async fn pack_header() -> Result<Bytes, Error> {
 }
 
 fn concurrency(context: &RepositoryRequestContext) -> PackfileConcurrency {
-    match &context.repo.inner_repo().repo_config.git_concurrency {
+    match &context.repo.repo_config.git_concurrency {
         Some(concurrency) => PackfileConcurrency::new(
             concurrency.trees_and_blobs,
             concurrency.commits,
@@ -122,7 +122,7 @@ async fn acknowledgements(
         .with_context(|| {
             format!(
                 "Failed to fetch bonsai_git_mapping for repo {}",
-                context.repo.name
+                context.repo.name()
             )
         })?;
     let mut output_buffer = vec![];
@@ -153,7 +153,7 @@ async fn git_commits(
         .with_context(|| {
             format!(
                 "Failed to fetch bonsai_git_mapping for repo {}",
-                context.repo.name
+                context.repo.name()
             )
         })
 }

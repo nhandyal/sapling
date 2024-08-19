@@ -14,6 +14,7 @@ use sql::Transaction;
 use crate::ctx::CommitCloudContext;
 use crate::references::local_bookmarks::LocalBookmarksMap;
 use crate::references::local_bookmarks::WorkspaceLocalBookmark;
+use crate::sql::common::UpdateWorkspaceNameArgs;
 use crate::sql::ops::Delete;
 use crate::sql::ops::Get;
 use crate::sql::ops::GetAsMap;
@@ -41,6 +42,11 @@ mononoke_queries! {
         none,
         mysql("INSERT INTO `bookmarks` (`reponame`, `workspace`, `name`, `node`) VALUES ({reponame}, {workspace}, {name}, {commit})")
         sqlite("INSERT INTO `workspacebookmarks` (`reponame`, `workspace`, `name`, `commit`) VALUES ({reponame}, {workspace}, {name}, {commit})")
+    }
+    write UpdateWorkspaceName( reponame: String, workspace: String, new_workspace: String) {
+        none,
+        mysql("UPDATE `bookmarks` SET workspace = {new_workspace} WHERE workspace = {workspace} and reponame = {reponame}")
+        sqlite("UPDATE `workspacebookmarks` SET workspace = {new_workspace} WHERE workspace = {workspace} and reponame = {reponame}")
     }
 }
 
@@ -120,17 +126,23 @@ impl Insert<WorkspaceLocalBookmark> for SqlCommitCloud {
 
 #[async_trait]
 impl Update<WorkspaceLocalBookmark> for SqlCommitCloud {
-    type UpdateArgs = ();
-
+    type UpdateArgs = UpdateWorkspaceNameArgs;
     async fn update(
         &self,
-        _txn: Transaction,
-        _cri: Option<&ClientRequestInfo>,
-        _cc_ctx: CommitCloudContext,
-        _args: Self::UpdateArgs,
+        txn: Transaction,
+        cri: Option<&ClientRequestInfo>,
+        cc_ctx: CommitCloudContext,
+        args: Self::UpdateArgs,
     ) -> anyhow::Result<(Transaction, u64)> {
-        //To be implemented among other Update queries
-        return Err(anyhow::anyhow!("Not implemented yet"));
+        let (txn, result) = UpdateWorkspaceName::maybe_traced_query_with_transaction(
+            txn,
+            cri,
+            &cc_ctx.reponame,
+            &cc_ctx.workspace,
+            &args.new_workspace,
+        )
+        .await?;
+        Ok((txn, result.affected_rows()))
     }
 }
 

@@ -25,6 +25,7 @@ from typing import Dict
 import bindings
 from bindings import renderdag
 from sapling import tracing
+from sapling.ext.extlib.phabricator import PHABRICATOR_COMMIT_MESSAGE_TAGS
 
 from . import (
     bookmarks,
@@ -1004,32 +1005,29 @@ def mergeeditform(ctxorbool, baseformname):
     return baseformname + ".normal"
 
 
-def getcommiteditor(edit=False, finishdesc=None, extramsg=None, editform="", **opts):
+def getcommiteditor(edit=False, editform="", summaryfooter="", **opts):
     """get appropriate commit message editor according to '--edit' option
-
-    'finishdesc' is a function to be called with edited commit message
-    (= 'description' of the new changeset) just after editing, but
-    before checking empty-ness. It should return actual text to be
-    stored into history. This allows to change description before
-    storing.
-
-    'extramsg' is a extra message to be shown in the editor instead of
-    'Leave message empty to abort commit' line. 'HG: ' prefix and EOL
-    is automatically added.
 
     'editform' is a dot-separated list of names, to distinguish
     the purpose of commit text editing.
 
-    'getcommiteditor' returns 'commitforceeditor' regardless of
-    'edit', if one of 'finishdesc' or 'extramsg' is specified, because
-    they are specific for usage in MQ.
+    'summaryfooter' is a prepopulated message to add extra info to the commit
+    summary.
     """
-    if edit or finishdesc or extramsg:
+    if edit:
         return lambda r, c: commitforceeditor(
-            r, c, finishdesc=finishdesc, extramsg=extramsg, editform=editform
+            r,
+            c,
+            editform=editform,
+            summaryfooter=summaryfooter,
         )
     else:
-        return lambda r, c: commiteditor(r, c, editform=editform)
+        return lambda r, c: commiteditor(
+            r,
+            c,
+            editform=editform,
+            summaryfooter=summaryfooter,
+        )
 
 
 def loglimit(opts):
@@ -2395,7 +2393,6 @@ class changeset_templater(changeset_printer):
         props["index"] = index = next(self._counter)
         props["revcache"] = {"copies": copies}
         props["cache"] = self.cache
-        props = props
 
         # write separator, which wouldn't work well with the header part below
         # since there's inherently a conflict between header (across items) and
@@ -4076,36 +4073,110 @@ def _amend(ui, repo, wctx, old, extra, opts, matcher):
     return newid
 
 
-def commiteditor(repo, ctx, editform=""):
-    if ctx.description():
-        return ctx.description()
+def commiteditor(repo, ctx, editform="", summaryfooter=""):
+    if description := ctx.description():
+        return add_summary_footer(description, summaryfooter)
+
     return commitforceeditor(
-        repo, ctx, editform=editform, unchangedmessagedetection=True
+        repo,
+        ctx,
+        editform=editform,
+        unchangedmessagedetection=True,
+        summaryfooter=summaryfooter,
     )
+
+
+def add_summary_footer(
+    commit_msg: str,
+    summary_footer: str,
+    commit_tags: str = PHABRICATOR_COMMIT_MESSAGE_TAGS,
+) -> str:
+    """
+    >>> print(add_summary_footer("", "i am a summary footer"))
+    <BLANKLINE>
+    i am a summary footer
+
+    >>> print(add_summary_footer("this is a title", ""))
+    this is a title
+
+    >>> print(add_summary_footer("this is a title", "i am a summary footer"))
+    this is a title
+    <BLANKLINE>
+    i am a summary footer
+
+    >>> print(add_summary_footer(
+    ...   "this is a title\\n\\nSummary: I am a summary",
+    ...   "i am a summary footer"
+    ... ))
+    this is a title
+    <BLANKLINE>
+    Summary: I am a summary
+    <BLANKLINE>
+    i am a summary footer
+
+    >>> print(add_summary_footer(
+    ...   "this is a title\\n\\nSummary: I am a summary\\n\\nTest Plan: I am a test plan",
+    ...   "i am a summary footer"
+    ... ))
+    this is a title
+    <BLANKLINE>
+    Summary: I am a summary
+    <BLANKLINE>
+    i am a summary footer
+    <BLANKLINE>
+    Test Plan: I am a test plan
+    """
+    if not summary_footer:
+        return commit_msg
+
+    lines = commit_msg.split("\n")
+    prev_tag = None
+    insert_idx = len(lines)
+    for i, line in enumerate(lines):
+        try:
+            tag = line[: line.index(":")]
+        except ValueError:
+            # not found ":"
+            continue
+
+        if tag in commit_tags:
+            if prev_tag == "Summary":
+                # found a tag after summary
+                insert_idx = i
+                break
+            prev_tag = tag
+
+    new_lines = lines[:insert_idx]
+    if new_lines[-1]:
+        new_lines.append("")
+    new_lines.append(summary_footer)
+    if insert_idx < len(lines):
+        new_lines.append("")
+    new_lines.extend(lines[insert_idx:])
+
+    return "\n".join(new_lines)
 
 
 def commitforceeditor(
     repo,
     ctx,
-    finishdesc=None,
-    extramsg=None,
     editform="",
     unchangedmessagedetection=False,
+    summaryfooter="",
 ):
-    if not extramsg:
-        extramsg = _("Leave message empty to abort commit.")
-
     forms = [e for e in editform.split(".") if e]
     forms.insert(0, "changeset")
     templatetext = None
     while forms:
         ref = ".".join(forms)
         if repo.ui.config("committemplate", ref):
-            templatetext = committext = buildcommittemplate(repo, ctx, extramsg, ref)
+            templatetext = committext = buildcommittemplate(
+                repo, ctx, ref, summaryfooter
+            )
             break
         forms.pop()
     else:
-        committext = buildcommittext(repo, ctx, extramsg)
+        committext = buildcommittext(repo, ctx, summaryfooter)
 
     # run editor in the repository root
     olddir = pycompat.getcwd()
@@ -4144,8 +4215,6 @@ def commitforceeditor(
     text = re.sub(f"(?m)^({all_prefixes}):.*(\n|$)", "", text)
     os.chdir(olddir)
 
-    if finishdesc:
-        text = finishdesc(text)
     if not text.strip():
         raise error.Abort(_("empty commit message"))
     if unchangedmessagedetection and editortext == templatetext:
@@ -4154,7 +4223,7 @@ def commitforceeditor(
     return text
 
 
-def buildcommittemplate(repo, ctx, extramsg, ref):
+def buildcommittemplate(repo, ctx, ref, summaryfooter=""):
     ui = repo.ui
     spec = formatter.templatespec(ref, None, None)
     t = changeset_templater(ui, repo, spec, None, {}, False)
@@ -4163,16 +4232,16 @@ def buildcommittemplate(repo, ctx, extramsg, ref):
         for k, v in repo.ui.configitems("committemplate")
     )
 
+    if summaryfooter:
+        t.t.cache.update({"summaryfooter": summaryfooter})
+
     # load extra aliases based on changed files
     if repo.ui.configbool("experimental", "local-committemplate"):
         localtemplate = localcommittemplate(repo, ctx)
         t.t.cache.update((k, templater.unquotestring(v)) for k, v in localtemplate)
 
-    if not extramsg:
-        extramsg = ""  # ensure that extramsg is string
-
     ui.pushbuffer()
-    t.show(ctx, extramsg=extramsg)
+    t.show(ctx)
     return pycompat.decodeutf8(ui.popbufferbytes(), errors="replace")
 
 
@@ -4217,12 +4286,13 @@ def hgprefix(msg):
     return "\n".join([f"{identity.tmplprefix()}: {a}" for a in msg.split("\n") if a])
 
 
-def buildcommittext(repo, ctx, extramsg):
+def buildcommittext(repo, ctx, summaryfooter=""):
     edittext = []
     modified, added, removed = ctx.modified(), ctx.added(), ctx.removed()
-    if ctx.description():
-        edittext.append(ctx.description())
-    edittext.append("")
+    description = ctx.description()
+    edittext.append(add_summary_footer(description, summaryfooter))
+    if edittext[-1]:
+        edittext.append("")
     edittext.append("")  # Empty line between message and comments.
     edittext.append(
         hgprefix(
@@ -4232,7 +4302,7 @@ def buildcommittext(repo, ctx, extramsg):
             )
         )
     )
-    edittext.append(hgprefix(extramsg))
+    edittext.append(hgprefix(_("Leave message empty to abort commit.")))
     edittext.append(f"{identity.tmplprefix()}: --")
     edittext.append(hgprefix(_("user: %s") % ctx.user()))
     if ctx.p2():

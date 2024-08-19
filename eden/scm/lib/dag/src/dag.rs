@@ -516,11 +516,17 @@ where
         parents: &dyn Parents,
         heads: &VertexListWithOptions,
     ) -> Result<bool> {
-        self.invalidate_snapshot();
-
         // Populate vertex negative cache to reduce round-trips doing remote lookups.
+        // Attention: this might have side effect recreating the snapshots!
         self.populate_missing_vertexes_for_add_heads(parents, &heads.vertexes())
             .await?;
+
+        // When heads are not VIRTUAL, invalidate_snapshot() helps performance, is optional for
+        // correctness. invalidate_snapshot() decreases VerLink ref count so VerLink::bump() can
+        // use a fast path mutating in place. When heads are VIRTUAL, invalidate_snapshot() is
+        // necessary for correctness, since the versions (VerLinks) won't be bumped to avoid
+        // excessive cache invalidation.
+        self.invalidate_snapshot();
 
         // This API takes `heads` with "desired_group"s. When a head already exists in a lower
         // group than its "desired_group" we need to remove the higher-group id and re-assign
@@ -1887,6 +1893,7 @@ where
     }
 
     /// Returns a set that covers all vertexes tracked by this DAG.
+    /// Excluding the virtual group.
     async fn all(&self) -> Result<Set> {
         let spans = self.dag().all()?;
         let result = Set::from_id_set_dag(spans, self)?;
@@ -1899,6 +1906,13 @@ where
         let spans = self.dag().master_group()?;
         let result = Set::from_id_set_dag(spans, self)?;
         result.hints().add_flags(Flags::ANCESTORS);
+        Ok(result)
+    }
+
+    /// Returns a set that covers all vertexes in the virtual group.
+    async fn virtual_group(&self) -> Result<Set> {
+        let spans = self.dag().all_ids_in_groups(&[Group::VIRTUAL])?;
+        let result = Set::from_id_set_dag(spans, self)?;
         Ok(result)
     }
 

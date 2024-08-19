@@ -331,42 +331,6 @@ def dispatch(req):
         ui = req.ui
         if ui.logmeasuredtimes:
             ui.log("measuredtimes", **(ui._measuredtimes))
-        hgmetrics = bindings.hgmetrics.summarize()
-        if hgmetrics:
-            # Comma-separated list of metric prefixes to skip
-            # TODO(meyer): Just skip printing metrics, rather than skipping logging them entirely.
-            skip = ui.configlist("devel", "skip-metrics", [])
-            # Re-arrange metrics so "a_b_c", "a_b_d", "a_c" becomes
-            # {'a': {'b': {'c': ..., 'd': ...}, 'c': ...}
-            metrics = {}
-            splitre = re.compile(r"_|/|\.")
-            for key, value in hgmetrics.items():
-                for prefix in skip:
-                    if key.startswith(prefix):
-                        break
-                else:
-                    cur = metrics
-                    names = splitre.split(key)
-                    for name in names[:-1]:
-                        cur = cur.setdefault(name, {})
-                    cur[names[-1]] = value
-            # pprint.pformat stablizes the output
-            from pprint import pformat
-
-            if metrics:
-                # developer config: devel.print-metrics
-
-                # This used to be a bool, but I changed it to a prefix list. Keep previous
-                # behavior around by using empty prefix to mean print everything.
-                prefix = ui.config("devel", "print-metrics")
-                if prefix == "":
-                    # Print it out.
-                    msg = "%s\n" % pformat({"metrics": metrics}).replace("'", " ")
-                    ui.flush()
-                    ui.write_err(msg, label="hgmetrics")
-
-                # Write to blackbox
-                ui.log("metrics", pformat({"metrics": metrics}, width=1024))
         blackbox.sync()
 
     versionthresholddays = req.ui.configint("ui", "version-age-threshold-days")

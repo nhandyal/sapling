@@ -216,6 +216,8 @@ where
             .await
             .map_err(|e| CasChangesetUploaderErrorKind::Error(e.into()))?;
 
+        let hg_root_manifest_id = HgAugmentedManifestId::new(hg_cs.manifestid().into_nodehash());
+
         // Diff hg manifest with parents
         let diff_stream = match (
             hg_cs.p1().map(HgChangesetId::new),
@@ -340,12 +342,15 @@ where
                     });
             }
             UploadPolicy::All => {
+                // Ensure the root manifest is uploaded last, so that we can use it to derive if entire changeset is already present in CAS
                 let (outcomes_trees, outcomes_files) = try_join!(
                     self.client
                         .ensure_upload_augmented_trees(
                             ctx,
                             &blobstore,
-                            manifests_list,
+                            manifests_list
+                                .into_iter()
+                                .filter(|(treeid, _)| *treeid != hg_root_manifest_id),
                             trees_lookup
                         )
                         .watched(ctx.logger()),
@@ -361,6 +366,20 @@ where
                 outcomes_files.into_iter().for_each(|(_, outcome)| {
                     upload_counter.tick(ctx, outcome);
                 });
+
+                // Upload the root manifest last
+                let outcome_root = self
+                    .client
+                    .upload_augmented_tree(
+                        ctx,
+                        &blobstore,
+                        &hg_root_manifest_id,
+                        None,
+                        trees_lookup,
+                    )
+                    .watched(ctx.logger())
+                    .await?;
+                upload_counter.tick(ctx, outcome_root);
             }
         }
 
@@ -572,5 +591,27 @@ where
         );
         STATS::uploaded_changesets_recursive.add_value(1);
         Ok(final_upload_counter)
+    }
+
+    /// Check if a given Changeset is already uploaded to a CAS backend by validating the presence of the hg root augmented manifest.
+    /// This is not full scan check but the best approximation we can do.
+    /// The lookup shouldn't be relied on if a changeset was uploaded with TreeOnly policy, the mode that isn't used in production.
+    pub async fn is_changeset_uploaded<'a>(
+        &self,
+        ctx: &'a CoreContext,
+        repo: &impl Repo,
+        changeset_id: &ChangesetId,
+    ) -> Result<bool, CasChangesetUploaderErrorKind> {
+        let (_, hg_root_manifest_id) = self
+            .get_manifest_id_from_changeset(ctx, repo, changeset_id)
+            .await?;
+
+        let hg_root_augmented_manifest_id: HgAugmentedManifestId =
+            HgAugmentedManifestId::new(hg_root_manifest_id.into_nodehash());
+
+        self.client
+            .is_augmented_tree_uploaded(ctx, repo.repo_blobstore(), &hg_root_augmented_manifest_id)
+            .await
+            .map_err(CasChangesetUploaderErrorKind::Error)
     }
 }

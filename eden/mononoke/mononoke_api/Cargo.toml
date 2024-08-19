@@ -13,7 +13,6 @@ anyhow = "1.0.75"
 async-trait = "0.1.71"
 basename_suffix_skeleton_manifest_v3 = { version = "0.1.0", path = "../derived_data/basename_suffix_skeleton_manifest_v3" }
 blame = { version = "0.1.0", path = "../derived_data/blame" }
-blobrepo = { version = "0.1.0", path = "../blobrepo" }
 blobrepo_hg = { version = "0.1.0", path = "../blobrepo/blobrepo_hg" }
 blobstore = { version = "0.1.0", path = "../blobstore" }
 blobstore_factory = { version = "0.1.0", path = "../blobstore/factory" }
@@ -45,7 +44,7 @@ derived_data_manager = { version = "0.1.0", path = "../derived_data/manager" }
 edenapi_types = { version = "0.1.0", path = "../../scm/lib/edenapi/types" }
 ephemeral_blobstore = { version = "0.1.0", path = "../blobstore/ephemeral_blobstore" }
 facet = { version = "0.1.0", git = "https://github.com/facebookexperimental/rust-shed.git", branch = "main" }
-fbinit = { version = "0.1.2", git = "https://github.com/facebookexperimental/rust-shed.git", branch = "main" }
+fbinit = { version = "0.2.0", git = "https://github.com/facebookexperimental/rust-shed.git", branch = "main" }
 filenodes = { version = "0.1.0", path = "../filenodes" }
 filestore = { version = "0.1.0", path = "../filestore" }
 fsnodes = { version = "0.1.0", path = "../derived_data/fsnodes" }
@@ -70,7 +69,6 @@ mercurial_derivation = { version = "0.1.0", path = "../derived_data/mercurial_de
 mercurial_mutation = { version = "0.1.0", path = "../mercurial/mutation" }
 mercurial_types = { version = "0.1.0", path = "../mercurial/types" }
 metaconfig_types = { version = "0.1.0", path = "../metaconfig/types" }
-mononoke_api_types = { version = "0.1.0", path = "types" }
 mononoke_repos = { version = "0.1.0", path = "../mononoke_repos" }
 mononoke_types = { version = "0.1.0", path = "../mononoke_types" }
 mutable_counters = { version = "0.1.0", path = "../mutable_counters" }
@@ -99,19 +97,16 @@ slog = { version = "2.7", features = ["max_level_trace", "nested-values"] }
 smallvec = { version = "1.6.1", features = ["serde", "specialization", "union"] }
 sorted_vector_map = { version = "0.2.0", git = "https://github.com/facebookexperimental/rust-shed.git", branch = "main" }
 sparse = { version = "0.1.0", path = "../../scm/lib/sparse", features = ["async"] }
-sql_construct = { version = "0.1.0", path = "../common/sql_construct" }
 sql_ext = { version = "0.1.0", path = "../common/rust/sql_ext" }
 sql_query_config = { version = "0.1.0", path = "../repo_attributes/sql_query_config" }
 stats = { version = "0.1.0", git = "https://github.com/facebookexperimental/rust-shed.git", branch = "main" }
 streaming_clone = { version = "0.1.0", path = "../repo_client/streaming_clone" }
 synced_commit_mapping = { version = "0.1.0", path = "../commit_rewriting/synced_commit_mapping" }
-test_repo_factory = { version = "0.1.0", path = "../repo_factory/test_repo_factory" }
 thiserror = "1.0.49"
 types = { version = "0.1.0", path = "../../scm/lib/types" }
 unbundle = { version = "0.1.0", path = "../repo_client/unbundle" }
 unodes = { version = "0.1.0", path = "../derived_data/unodes" }
 vec1 = { version = "1", features = ["serde"] }
-warm_bookmarks_cache = { version = "0.1.0", path = "../bookmarks/warm_bookmarks_cache" }
 wireproto_handler = { version = "0.1.0", path = "../wireproto_handler" }
 xdiff = { version = "0.1.0", path = "../../scm/lib/xdiff" }
 
@@ -123,4 +118,5 @@ fbinit-tokio = { version = "0.1.2", git = "https://github.com/facebookexperiment
 fixtures = { version = "0.1.0", path = "../tests/fixtures" }
 gix-object = "0.33"
 pretty_assertions = { version = "1.2", features = ["alloc"], default-features = false }
+test_repo_factory = { version = "0.1.0", path = "../repo_factory/test_repo_factory" }
 tests_utils = { version = "0.1.0", path = "../tests/utils" }

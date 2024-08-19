@@ -218,7 +218,6 @@ def uisetup(ui):
     )
     extensions.wrapfunction(debugcommands, "_debugbundle2part", _debugbundle2part)
     extensions.wrapfunction(repair, "_collectfiles", collectfiles)
-    extensions.wrapfunction(repair, "striptrees", striptrees)
     extensions.wrapfunction(repair, "_collectmanifest", _collectmanifest)
     extensions.wrapfunction(repair, "stripmanifest", stripmanifest)
     extensions.wrapfunction(bundle2, "_addpartsfromopts", _addpartsfromopts)
@@ -595,7 +594,7 @@ class basetreemanifestlog:
             )
             self.datastore = self.treescmstore
             self.historystore = revisionstore.metadatastore(
-                self._repo.svfs.vfs.base,
+                self._repo.svfs.base,
                 self.ui._rcfg,
                 remotestore,
                 None,
@@ -1720,11 +1719,6 @@ def collectfiles(orig, repo, striprev):
             files.update(repo[x].files())
 
     return sorted(files)
-
-
-def striptrees(orig, repo, tr, striprev, files):
-    if not treeenabled(repo.ui):
-        return orig(repo, tr, striprev, files)
 
 
 def _addpartsfromopts(orig, ui, repo, bundler, source, outgoing, *args, **kwargs):
