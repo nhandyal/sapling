@@ -54,4 +54,4 @@ RUN echo "$USER_NAME ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
 
 WORKDIR /home/$USER_NAME/actions-runner
 USER $USER_NAME
-CMD [/home/sapling/actions-runner/run.sh]
+CMD ["/home/sapling/actions-runner/run.sh"]
