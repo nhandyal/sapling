@@ -36,13 +36,15 @@ RUN mkdir -p /home/$USER_NAME && cd /home/$USER_NAME && \
     tar xzf ./actions-runner-linux-arm64-2.319.0.tar.gz
 
 # Create the wrapper script
-ARG CONFIG_SCRIPT_PATH=/home/$USER_NAME/actions-runner/config.sh
-RUN mv $CONFIG_SCRIPT_PATH /home/$USER_NAME/actions-runner/_config.sh && \
-    echo '#!/usr/bin/env bash' > $CONFIG_SCRIPT_PATH && \
-    echo 'set -xe\n' >> $CONFIG_SCRIPT_PATH && \
-    echo 'read -p "Enter GH action runner token: " token' >> $CONFIG_SCRIPT_PATH && \
-    echo './_config.sh --url https://github.com/nhandyal/sapling --token "$token" --unattended --labels self-hosted,ubuntu-20.04,arm64 --no-default-labels --replace'  >> $CONFIG_SCRIPT_PATH && \
-    chmod +x $CONFIG_SCRIPT_PATH
+ARG RUN_SCRIPT_PATH=/home/$USER_NAME/actions-runner/run.sh
+RUN mv $RUN_SCRIPT_PATH /home/$USER_NAME/actions-runner/_run.sh && \
+    echo '#!/usr/bin/env bash' > $RUN_SCRIPT_PATH && \
+    echo 'set -xe\n' >> $RUN_SCRIPT_PATH && \
+    echo 'read -p "Enter GH action runner token: " token' >> $RUN_SCRIPT_PATH && \
+    echo './config.sh --url https://github.com/nhandyal/sapling --token "$token" --unattended --labels self-hosted,ubuntu-20.04,arm64 --no-default-labels --replace'  >> $RUN_SCRIPT_PATH && \
+    echo './_run.sh' >> $RUN_SCRIPT_PATH && \
+    echo './config.sh remove --token "$token"' >> $RUN_SCRIPT_PATH && \
+    chmod +x $RUN_SCRIPT_PATH
     
 # Configure the user
 RUN echo "$USER_NAME ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
@@ -52,4 +54,4 @@ RUN echo "$USER_NAME ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
 
 WORKDIR /home/$USER_NAME/actions-runner
 USER $USER_NAME
-CMD ["tail", "-f", "/dev/null"]
+CMD [/home/sapling/actions-runner/run.sh]
